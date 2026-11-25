@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 update.py
+      - name: Comprimi cataloghi scaricabili
+        run: gzip public/film.json public/serie.json
       - uses: actions/configure-pages@v5
         with:
           enablement: true
