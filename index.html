@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bobo Movies Night</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% 46%,#18243b 0,#0d1220 45%,#080b12 80%);color:#edf4ff;font:16px system-ui,sans-serif;min-height:100svh;display:grid;place-items:center}main{text-align:center;width:min(90vw,510px);padding:45px 0}h1{margin:0 auto 36px;width:fit-content;transform:skewX(-11deg)}strong{display:block;font:1000 clamp(76px,18vw,128px)/.83 "Arial Black",Arial,sans-serif;letter-spacing:-.105em;padding-right:.09em;background:linear-gradient(#fff 15%,#dce5f5 47%,#99abc8 52%,#f1f6ff 94%);color:transparent;background-clip:text}em{display:block;background:#bdff56;color:#101620;width:fit-content;margin:4px 0 0 auto;padding:4px 10px;font:bold 13px/1 Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase}
+input,button{font:inherit;color:inherit}input{width:100%;padding:18px 22px;border:1px solid #516078;border-radius:15px;background:#131b29;text-align:center}input:focus-visible,button:focus-visible{outline:2px solid #bdff56;outline-offset:2px}input::placeholder{color:#c5cddd}#list{max-height:34svh;overflow:auto;border-radius:12px;margin-top:7px}button{background:#172132;border:0;border-bottom:1px solid #303a49;display:block;width:100%;padding:12px;cursor:pointer}button:hover,button:focus{background:#26354a}small{display:block;color:#afbcd0;margin-top:2px}output{display:block;margin-top:14px;color:#bdff56;font-weight:700}output:empty{margin:0}
+main:has(#watch:not([hidden])){width:min(94vw,900px)}#query,#list{max-width:510px;margin-inline:auto}iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:14px;background:black}#watch{margin-top:20px}nav{display:flex;align-items:center;justify-content:center;gap:8px;margin:10px 0}nav button{width:auto;border-radius:8px}nav span{min-width:8em}button:disabled{opacity:.35;cursor:default}[hidden]{display:none!important}#manual input{width:5em;padding:6px}#manual button{width:auto;display:inline-block}a{color:#bdff56}</style><main><h1 aria-label="Bobo Movies Night"><strong>BOBO</strong><em>Movies Night</em></h1>
+<input id="query" type="search" autocomplete="off" aria-label="Cerca un film o una serie TV" placeholder="Cerca un film o una serie TV…"><div id="list"></div><output id="status" aria-live="polite"></output><section id="watch" hidden>
+<nav id="controls" aria-label="Episodi" hidden><button id="back">← Precedente</button><span id="position" aria-live="polite"></span><button id="next">Successivo →</button></nav>
+<form id="manual" hidden><small>Elenco episodi non disponibile</small><label>Stagione <input id="sn" type="number" min="1" required value="1"></label> <label>Episodio <input id="ep" type="number" min="1" required value="1"></label> <button>Apri</button></form>
+<iframe id="frame" title="Player Vix" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen></iframe>
+<a id="external" target="_blank" rel="noopener">Apri nel player Vix ↗</a></section></main><script src="stagioni.js"></script>
+<script>
+const input=document.querySelector('#query'),list=document.querySelector('#list'),statusBox=document.querySelector('#status');
+const el=id=>document.getElementById(id);
+let current, seasons=[], season, episode;
+function adjacent(step){
+ const n=episode+step;
+ if(!seasons.length)return n>0?[season,n]:null;
+ const i=seasons.findIndex(item=>item[0]===season);
+ if(n>=1 && n<=seasons[i][1])return [season,n];
+ const other=seasons[i+step];
+ return other?[other[0],step>0?1:other[1]]:null;
+}
+function showPlayer(){
+ const tv=current[2]==='serie';
+ const url='https://vixsrc.to/'+(tv?'tv/'+current[1]+'/'+season+'/'+episode:'movie/'+current[1])+'?lang=it';
+ el('frame').src=url;el('external').href=url;el('watch').hidden=false;
+ el('controls').hidden=!tv;el('manual').hidden=!tv||seasons.length>0;
+ if(tv){
+  el('position').textContent='S'+season+' · Ep. '+episode;
+  el('sn').value=season;el('ep').value=episode;
+  el('back').disabled=!adjacent(-1);el('next').disabled=!adjacent(1);
+ }
+}
+function selectTitle(row){
+ current=row;seasons=(row[2]==='serie' && seasonsById[row[1]])||[];
+ season=seasons.length?seasons[0][0]:1;episode=1;
+ input.value=row[0];list.replaceChildren();statusBox.textContent='ID TMDB · '+row[1];
+ showPlayer();
+}
+for(const [id,step] of [['back',-1],['next',1]]){
+ el(id).onclick=()=>{const dest=adjacent(step);if(dest){[season,episode]=dest;showPlayer()}};
+}
+el('manual').onsubmit=e=>{e.preventDefault();season=Number(el('sn').value);episode=Number(el('ep').value);showPlayer()};
+let timer,revision=0;
+const shards=new Map(),pending=new Map();
+function receive(code,data){shards.set(code,data)}
+function load(code){
+ if(shards.has(code))return Promise.resolve(shards.get(code));
+ if(pending.has(code))return pending.get(code);
+ const promise=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');
+  script.src='indice/'+code+'.js';
+  script.onload=()=>{script.remove();pending.delete(code);resolve(shards.get(code)||{})};
+  script.onerror=()=>{script.remove();pending.delete(code);reject(new Error())};
+  document.head.append(script);
+ });
+ pending.set(code,promise);return promise;
+}
+async function search(term,version){
+ const norm=term.toLowerCase().normalize('NFKD').replace(/\p{M}/gu,'').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+ if(!norm){statusBox.textContent='';return}
+ const key=Array.from(norm).slice(0,2);
+ const code=key.reduce((sum,c,i)=>sum+c.codePointAt(0)*(i+1),0)%512;
+ try{
+  const data=await load(code);
+  if(version!==revision)return;
+  const matches=[];
+  for(const row of data[key.join('')]||[]){
+   const names=row[5].flatMap(n=>[n,n.replace(/^(the|a|an|il|lo|la|i|gli|le|l|un|una) /,'')]);
+   if(names.some(n=>n.startsWith(norm)))matches.push([names.includes(norm)?1:0,row]);
+  }
+  matches.sort((a,b)=>b[0]-a[0]||b[1][4]-a[1][4]);
+  for(const [,row] of matches.slice(0,20)){
+   const button=document.createElement('button'),meta=document.createElement('small');
+   button.textContent=row[0];meta.textContent=[row[2]==='serie'?'Serie TV':'Film',row[3]].filter(Boolean).join(' · ');
+   button.append(meta);button.onclick=()=>selectTitle(row);list.append(button);
+  }
+  statusBox.textContent=matches.length?'':'Nessun titolo trovato.';
+ }catch{if(version===revision)statusBox.textContent='Indice non disponibile. Verifica la cartella indice e riprova.'}
+}
+input.oninput=()=>{
+ clearTimeout(timer);revision++;list.replaceChildren();statusBox.textContent='';
+ const term=input.value.trim();
+ if(term.length<2)return;
+ const version=revision;
+ statusBox.textContent='Ricerca…';
+ timer=setTimeout(()=>search(term,version),250);
+};
+document.onkeydown=e=>{
+ const buttons=[...list.children],index=buttons.indexOf(document.activeElement);
+ if(e.key==='Escape'){clearTimeout(timer);revision++;list.replaceChildren();statusBox.textContent='';input.focus();return}
+ if(!buttons.length)return;
+ if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();buttons[(index+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length].focus()}
+ if(e.key==='Enter' && document.activeElement===input)buttons[0].click();
+};
+</script></html>
